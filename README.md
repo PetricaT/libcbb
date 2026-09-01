@@ -1,4 +1,4 @@
-# libcbb
+# libcbb - (odeCBB)
 
 A tiny BBCode-to-HTML microlibrary written in pure C11 with zero dependencies.
 Distributed as an amalgamated single header (`libcbb.h`) using the
