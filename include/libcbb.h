@@ -1,47 +1,12 @@
 /*
- * libcbb - tiny BBCode-to-HTML microlibrary
+ * libcbb - tiny BBCode-to-HTML microlibrary (pure C11, zero deps)
  *
  * MIT License
  * Copyright (c) 2026 Petrica
  *
- * A single-header, zero-dependency C11 BBCode renderer using the stb-style
- * amalgamated distribution pattern. Two-function API: cbb_to_html(input)
- * and cbb_free(s). See README.md for the supported tag set.
- *
- * ----- How to use -----
- *
- * Option A - header-only (recommended for small projects):
- *
- *   In EXACTLY ONE .c file in your project:
- *
- *     #define CBB_IMPLEMENTATION
- *     #include "libcbb.h"
- *
- *   In every other .c file that calls cbb_to_html/cbb_free, just:
- *
- *     #include "libcbb.h"
- *
- *   No .c file to compile separately. No library to link.
- *
- * Option B - compile the implementation separately (faster incremental builds):
- *
- *   Copy include/libcbb.h into your project. Create a libcbb.c that does:
- *
- *     #define CBB_IMPLEMENTATION
- *     #include "libcbb.h"
- *
- *   Compile libcbb.c once and link the resulting object. Other translation
- *   units include "libcbb.h" without defining CBB_IMPLEMENTATION.
- *
- * Option C - CMake subdirectory:
- *
- *   add_subdirectory(libcbb)
- *   target_link_libraries(your_target PRIVATE libcbb)
- *   # In your sources: #include "libcbb.h"
- *
- * The CMake target builds the test executable only. To consume libcbb from
- * your own CMake project, just include the header (Option A or B above) - the
- * CMake target exists so this repo's own tests can be built and run via ctest.
+ * Single-header, stb-style amalgamated distribution. Two-function API:
+ * cbb_to_html(input) / cbb_free(s). See README.md for the supported tag set
+ * and the three consumption patterns (header-only / one .c shim / CMake).
  */
 
 #ifndef LIBCBB_H
@@ -52,24 +17,31 @@ extern "C" {
 #endif
 
 /*
- * Convert a BBCode string to HTML.
- *
- * - `input` must be a NUL-terminated UTF-8 (or ASCII) string. NULL is treated
- *   as an empty string.
- * - Returns a newly allocated, NUL-terminated HTML string on success, or NULL
- *   if allocation fails.
- * - The returned string must be released with `cbb_free`.
+ * Convert a NUL-terminated BBCode string to HTML. NULL input is treated as
+ * "". Returns a newly allocated, NUL-terminated HTML string, or NULL on
+ * allocation failure. Release with cbb_free.
  *
  * Supported tags: b, i, u, s, strike, color, size, font, url, img, quote,
  * code, list, olist, *, hr, center, right, spoiler, noparse, heading, h1-h4,
- * sub, sup, youtube, email, table, tr, th, td, line. Unknown tags are
- * dropped; their content passes through as escaped text. [code] and
- * [noparse] content is escaped but otherwise emitted verbatim. URLs that
- * begin with `javascript:` are stripped from href/src attributes.
+ * sub, sup, youtube, email, table, tr, th, td, line. Unknown tags drop but
+ * their content passes through as escaped text.
+ *
+ * [code] and [noparse] both imply noparse semantics: the first matching
+ * close terminates the block (a stray [/code] inside [noparse] - or vice
+ * versa - is shown as literal text, not treated as a closer), and inner
+ * content is HTML-escaped but emitted verbatim.
+ *
+ * [img] accepts both [img=src] and [img]src[/img] form; inner BBCode markup
+ * inside [img]...[/img] is stripped so only the text content becomes the
+ * src. URL args reject tab/newline/CR/control chars and leading/trailing
+ * whitespace (WHATWG-strip sanitizer-bypass defense), and the color/size/
+ * font args reject CSS meta-characters (;, {, }, (, ), ", ') and whitespace
+ * other than a single ASCII space (CSS-injection and attribute-breakout
+ * defense).
  */
 char *cbb_to_html(const char *input);
 
-/* Free a string returned by `cbb_to_html`. NULL is a no-op. */
+/* Free a string returned by cbb_to_html. NULL is a no-op. */
 void cbb_free(char *s);
 
 #ifdef __cplusplus
@@ -77,12 +49,8 @@ void cbb_free(char *s);
 #endif
 
 /* ========================================================================
- * Implementation
- *
- * Everything below this point is compiled only when CBB_IMPLEMENTATION is
- * defined. Define it in exactly ONE translation unit (typically a .c file)
- * before including this header. Other translation units include the header
- * without defining CBB_IMPLEMENTATION - they get the declarations only.
+ * Implementation - compiled only when CBB_IMPLEMENTATION is defined in
+ * exactly one translation unit before including this header.
  * ======================================================================== */
 #ifdef CBB_IMPLEMENTATION
 
@@ -96,7 +64,6 @@ typedef struct cbb_tag_def {
     int has_arg;            /* 1 if [name=arg] is supported */
 } cbb_tag_def;
 
-/* The single tag table. Order does not matter; lookup is by name. */
 static const cbb_tag_def cbb_tags[] = {
     {"b",       "<b>",                                          "</b>",          0},
     {"i",       "<i>",                                          "</i>",          0},
@@ -104,7 +71,7 @@ static const cbb_tag_def cbb_tags[] = {
     {"s",       "<s>",                                          "</s>",          0},
     {"strike",  "<s>",                                          "</s>",          0},
     {"color",   "<span style=\"color:%s;\">",                   "</span>",       1},
-    {"size",    "<span style=\"font-size:%s;\">",                "</span>",       1},
+    {"size",    "<span style=\"font-size:%s;\">",               "</span>",       1},
     {"font",    "<span style=\"font-family:%s;\">",             "</span>",       1},
     {"url",     "<a href=\"%s\">",                               "</a>",          1},
     {"img",     "<img src=\"%s\" alt=\"\">",                    "",              1},
@@ -187,8 +154,8 @@ static void cbb_putsn(cbb_buf *b, const char *s, size_t n) {
 
 static void cbb_puts(cbb_buf *b, const char *s) { cbb_putsn(b, s, strlen(s)); }
 
-/* HTML-escape `s` (length n) into `b`. Used for both element text and
- * attribute values - the entity set is the same for both. */
+/* HTML-escape `s` (length n) into `b`. Same entity set for element text
+ * and attribute values. */
 static void cbb_esc(cbb_buf *b, const char *s, size_t n) {
     for (size_t i = 0; i < n; ++i) {
         unsigned char c = (unsigned char)s[i];
@@ -203,11 +170,51 @@ static void cbb_esc(cbb_buf *b, const char *s, size_t n) {
     }
 }
 
-/* Returns 0 if `raw` has a safe URL scheme (or no scheme / relative path),
- * -1 otherwise. Safe schemes: http, https, mailto, ftp, ftps. */
+/* URL sanitizer. Returns 0 if `raw` is safe to emit as an href / img src,
+ * -1 otherwise. Safe schemes: http, https, mailto, ftp, ftps.
+ *
+ * Defense against the WHATWG URL-strip bypass: the WHATWG URL parser strips
+ * ASCII tab/LF/CR and trims leading/trailing C0 controls + whitespace
+ * before parsing the scheme, so a sanitizer that scans the raw bytes will
+ * miss bypasses like "java\tscript:alert(1)" or " javascript:alert(1)" -
+ * both render in the browser as the dangerous "javascript:" scheme.
+ *
+ * Two layers: (1) outright reject any raw URL containing C0/DEL/whitespace
+ * anywhere (those characters never appear in well-formed URLs), then
+ * (2) build a normalized copy with C0 controls + edge whitespace removed,
+ * and check the scheme against the allowlist. Pass 1 catches bypasses
+ * before normalization; pass 2 is defense-in-depth in case pass 1 is ever
+ * loosened. The normalized copy is heap-allocated so legitimately long
+ * URLs (presigned S3/CDN/image URLs well over 256 bytes) are not
+ * truncated. */
 static int cbb_url_ok(const char *raw) {
+    /* Pass 1: reject any C0 control, DEL, or whitespace anywhere. */
+    size_t n = strlen(raw);
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)raw[i];
+        if (c <= 0x20 || c == 0x7f) return -1;
+    }
+
+    /* Pass 2: build a normalized copy (strip C0, trim edge whitespace). */
+    char *buf = (char *)malloc(n + 1);
+    if (!buf) return -1;
+    size_t j = 0;
+    int lead_ws = 1;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)raw[i];
+        int is_ctrl = (c <= 0x1f) || c == 0x7f;
+        int is_sp = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+        if (is_ctrl) continue;
+        if (is_sp && lead_ws) continue;
+        lead_ws = 0;
+        if (is_sp && i + 1 == n) continue;
+        buf[j++] = (char)c;
+    }
+    buf[j] = '\0';
+
+    /* Pass 3: scheme detection on the normalized form. */
     const char *colon = NULL;
-    for (const char *p = raw; *p; ++p) {
+    for (const char *p = buf; *p; ++p) {
         int ch = (unsigned char)*p;
         if (ch == ':') { colon = p; break; }
         if (ch == '/' || ch == '?' || ch == '#') break;
@@ -215,15 +222,27 @@ static int cbb_url_ok(const char *raw) {
               (ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '.'))
             break;
     }
-    if (!colon) return 0;
-    size_t slen = (size_t)(colon - raw);
-    if (slen > 15) return -1;
-    char s[16];
-    for (size_t i = 0; i < slen; ++i) s[i] = (char)cbb_lo((unsigned char)raw[i]);
-    s[slen] = '\0';
-    static const char *safe[] = {"http", "https", "mailto", "ftp", "ftps", NULL};
-    for (int i = 0; safe[i]; ++i) if (strcmp(s, safe[i]) == 0) return 0;
-    return -1;
+    int rc;
+    if (!colon) {
+        rc = 0;
+    } else {
+        size_t slen = (size_t)(colon - buf);
+        if (slen == 0 || slen > 15) {
+            rc = -1;
+        } else {
+            char s[16];
+            for (size_t i = 0; i < slen; ++i)
+                s[i] = (char)cbb_lo((unsigned char)buf[i]);
+            s[slen] = '\0';
+            static const char *safe[] = {"http", "https", "mailto", "ftp", "ftps", NULL};
+            int found = 0;
+            for (int i = 0; safe[i]; ++i)
+                if (strcmp(s, safe[i]) == 0) { found = 1; break; }
+            rc = found ? 0 : -1;
+        }
+    }
+    free(buf);
+    return rc;
 }
 
 /* --------- tokenizer --------- */
@@ -284,12 +303,35 @@ static int cbb_tok_(const char *in, cbb_tok *o, int cap) {
 
 /* --------- validation / output --------- */
 
-/* Stack entry. tag == NULL means an unknown/noparse/code tag that has no
- * HTML markup to emit but still occupies a slot for [/name] matching. */
+/* Stack entry. tag == NULL means an unknown / [noparse] tag that has no
+ * HTML markup to emit but still occupies a slot for [/name] matching.
+ *
+ * If `img_pending` is non-zero, the entry was opened as `[img]` (no arg)
+ * and is waiting for the inner text to be collected as src. tag is the
+ * `img` def, `arg` is a heap buffer that accumulates TEXT fragments. */
 typedef struct cbb_st {
     const cbb_tag_def *tag;
-    char *arg;  /* heap-allocated NUL-terminated arg (NULL if no arg) */
+    char *arg;            /* heap-allocated NUL-terminated arg (NULL if no arg,
+                           * or, for img_pending entries, the accumulating buffer) */
+    int img_pending;      /* 1 if this entry was opened as `[img]` with no arg */
 } cbb_st;
+
+/* Growable tag stack. Grows on demand the same way cbb_buf grows; depth
+ * is always <= cap. */
+typedef struct { cbb_st *data; int len; int cap; int oom; } cbb_stk;
+
+static void cbb_stk_push(cbb_stk *s, cbb_st e) {
+    if (s->oom) { free(e.arg); return; }
+    if (s->len == s->cap) {
+        int ncap = s->cap ? s->cap * 2 : 16;
+        /* INT_MAX/2 leaves headroom for one more doubling before bail. */
+        if (ncap < s->cap || ncap > 0x3fffffff) { s->oom = 1; free(e.arg); return; }
+        cbb_st *p = (cbb_st *)realloc(s->data, (size_t)ncap * sizeof *p);
+        if (!p) { s->oom = 1; free(e.arg); return; }
+        s->data = p; s->cap = ncap;
+    }
+    s->data[s->len++] = e;
+}
 
 static void cbb_emit_open(cbb_buf *o, const cbb_st *e) {
     if (!e->tag || !e->tag->html_open[0]) return;
@@ -302,29 +344,37 @@ static void cbb_emit_open(cbb_buf *o, const cbb_st *e) {
 }
 
 static void cbb_emit_close(cbb_buf *o, const cbb_st *e) {
+    /* img_pending entries accumulate inner text as src; close renders
+     * the <img> tag now that we know the src. */
+    if (e->img_pending) {
+        cbb_puts(o, "<img src=\"");
+        if (e->arg) cbb_esc(o, e->arg, strlen(e->arg));
+        cbb_puts(o, "\" alt=\"\">");
+        return;
+    }
     if (e->tag && e->tag->html_close[0]) cbb_puts(o, e->tag->html_close);
 }
 
 /* Find the topmost stack entry whose tag matches `name`, or -1. */
-static int cbb_find(const cbb_st *st, int d, const char *n, int nl) {
-    for (int i = d - 1; i >= 0; --i)
-        if (st[i].tag && cbb_eq(n, nl, st[i].tag->name)) return i;
+static int cbb_find(const cbb_stk *s, const char *n, int nl) {
+    for (int i = s->len - 1; i >= 0; --i)
+        if (s->data[i].tag && cbb_eq(n, nl, s->data[i].tag->name)) return i;
     return -1;
 }
 
-/* Close stack entries from `to` up to (depth-1) (inclusive), emit closes,
- * free their args, and update `d` to `to`. */
-static void cbb_pop_to(cbb_buf *o, cbb_st *st, int *d, int to) {
-    for (int j = *d - 1; j > to; --j) cbb_emit_close(o, &st[j]);
-    cbb_emit_close(o, &st[to]);
-    for (int j = to; j < *d; ++j) free(st[j].arg);
-    *d = to;
+/* Close stack entries from `to` up to (len-1) (inclusive), emit closes,
+ * free their args, and update len to `to`. */
+static void cbb_pop_to(cbb_buf *o, cbb_stk *s, int to) {
+    for (int j = s->len - 1; j > to; --j) cbb_emit_close(o, &s->data[j]);
+    cbb_emit_close(o, &s->data[to]);
+    for (int j = to; j < s->len; ++j) free(s->data[j].arg);
+    s->len = to;
 }
 
 /* Find the topmost <li> on the stack, or -1. */
-static int cbb_find_li(const cbb_st *st, int d) {
-    for (int i = d - 1; i >= 0; --i)
-        if (st[i].tag && cbb_eq("*", 1, st[i].tag->name)) return i;
+static int cbb_find_li(const cbb_stk *s) {
+    for (int i = s->len - 1; i >= 0; --i)
+        if (s->data[i].tag && cbb_eq("*", 1, s->data[i].tag->name)) return i;
     return -1;
 }
 
@@ -332,52 +382,112 @@ char *cbb_to_html(const char *input) {
     if (!input) input = "";
 
     size_t ilen = strlen(input);
-    int cap = (int)(ilen / 2 + 16);
+    /* Defensive clamp: if input is huge (multi-GB) the size_t->int narrowing
+     * would silently truncate. Cap at INT_MAX/2 so cbb_tok_ cannot loop past
+     * int-range and the cast is well-defined. A truncation here means
+     * "refuse to allocate this many, bail." Caller gets NULL. */
+    int cap;
+    if (ilen > (size_t)0x3fffffff) cap = 0x3fffffff;
+    else cap = (int)(ilen / 2 + 16);
     cbb_tok *toks = (cbb_tok *)malloc(sizeof *toks * (size_t)cap);
     if (!toks) return NULL;
     int n = cbb_tok_(input, toks, cap);
 
     cbb_buf out = {0};
-    cbb_st stack[64];
-    int depth = 0, in_code = 0, noparse = 0;
+    cbb_stk stack = {0};
+    int in_code = 0, noparse = 0;
 
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n && !out.oom; ++i) {
         const cbb_tok *t = &toks[i];
-        if (t->kind == T_TEXT) { cbb_esc(&out, t->text, (size_t)t->text_len); continue; }
+        if (t->kind == T_TEXT) {
+            /* Topmost open tag is [img] waiting for its src: inner text
+             * becomes the URL argument. We do NOT escape here - the arg
+             * is the raw URL, and cbb_emit_close will escape it once at
+             * close time (cbb_url_ok sanitization happens at that boundary,
+             * same as for [img=src] form). */
+            if (stack.len > 0 && stack.data[stack.len - 1].img_pending) {
+                cbb_st *top = &stack.data[stack.len - 1];
+                size_t cur = top->arg ? strlen(top->arg) : 0;
+                size_t need = cur + (size_t)t->text_len + 1;
+                if (need > (size_t)0x3fffffff) { out.oom = 1; break; }
+                char *grown = (char *)realloc(top->arg, need);
+                if (!grown) { out.oom = 1; break; }
+                if (!top->arg) grown[0] = '\0';
+                top->arg = grown;
+                memcpy(top->arg + cur, t->text, (size_t)t->text_len);
+                top->arg[need - 1] = '\0';
+                continue;
+            }
+            cbb_esc(&out, t->text, (size_t)t->text_len);
+            continue;
+        }
+        /* Topmost open tag is [img] waiting for its src: inner content
+         * is the URL. TEXT is appended raw (handled above); any inner
+         * OPEN/CLOSE tokens are stray BBCode markup that should be
+         * STRIPPED - they are not part of the URL. EXCEPT the matching
+         * closing [/img] which terminates the block and falls through
+         * to the normal close path (which runs cbb_url_ok on the
+         * accumulated src). Without this, [img][b]https://x.png[/b][/img]
+         * would parse [b]...[/b] as BBCode and the URL would be lost. */
+        if (stack.len > 0 && stack.data[stack.len - 1].img_pending) {
+            const cbb_st *topp = &stack.data[stack.len - 1];
+            int matching_close = (t->kind == T_CLOSE && topp->tag &&
+                cbb_eq(t->name, t->name_len, topp->tag->name));
+            if (!matching_close) continue;
+        }
         const cbb_tag_def *def = cbb_lookup(t->name, t->name_len);
 
-        /* Inside [noparse]: emit tags verbatim until [/noparse]. */
+        /* Inside [noparse] or [code]: emit tags verbatim (escaped) until
+         * the matching close. Both imply noparse semantics.
+         *
+         * The close handler consults the topmost stack entry: [code] pushes
+         * the `code` tag def, [noparse] pushes NULL. The "cross-close" bug
+         * is treating [/code] and [/noparse] as interchangeable terminators
+         * - an inner close of the OTHER name would prematurely pop the
+         * outer block and leak the rest into BBCode-parsed output. */
         if (noparse > 0) {
-            if (t->kind == T_CLOSE && def && cbb_eq(t->name, t->name_len, "noparse")) {
-                noparse--;
-                if (depth > 0) --depth;
-                continue;
+            if (t->kind == T_CLOSE && stack.len > 0) {
+                const cbb_st *top = &stack.data[stack.len - 1];
+                int top_is_noparse = (top->tag == NULL);
+                int top_is_code = (top->tag && cbb_eq(top->tag->name, (int)strlen(top->tag->name), "code"));
+                int close_is_noparse = cbb_eq(t->name, t->name_len, "noparse");
+                int close_is_code = cbb_eq(t->name, t->name_len, "code");
+                if ((top_is_noparse && close_is_noparse) ||
+                    (top_is_code && close_is_code)) {
+                    if (top_is_code) {
+                        cbb_puts(&out, "</code></pre>");
+                        in_code--;
+                    }
+                    noparse--;
+                    stack.len--;
+                    continue;
+                }
             }
             cbb_esc(&out, t->raw, (size_t)t->raw_len);
             continue;
         }
 
         if (t->kind == T_OPEN) {
-            /* [code] wraps in <pre><code>; inner tags still process.
-             * [noparse] suppresses inner tag processing. */
             if (def && cbb_eq(t->name, t->name_len, "code")) {
-                stack[depth].tag = def; stack[depth].arg = NULL; depth++;
-                cbb_puts(&out, "<pre><code>"); in_code++;
+                cbb_stk_push(&stack, (cbb_st){def, NULL, 0});
+                cbb_puts(&out, "<pre><code>");
+                in_code++;
+                noparse++; /* share the noparse suppression mechanism */
                 continue;
             }
             if (def && cbb_eq(t->name, t->name_len, "noparse")) {
-                stack[depth].tag = NULL; stack[depth].arg = NULL; depth++;
+                cbb_stk_push(&stack, (cbb_st){NULL, NULL, 0});
                 noparse++;
                 continue;
             }
             /* [*] auto-closes any open <li>. */
             if (def && cbb_eq(t->name, t->name_len, "*")) {
-                int li = cbb_find_li(stack, depth);
-                if (li >= 0) cbb_pop_to(&out, stack, &depth, li);
+                int li = cbb_find_li(&stack);
+                if (li >= 0) cbb_pop_to(&out, &stack, li);
             }
             /* Unknown tag: drop the markers, content passes through. */
             if (!def) {
-                stack[depth].tag = NULL; stack[depth].arg = NULL; depth++;
+                cbb_stk_push(&stack, (cbb_st){NULL, NULL, 0});
                 continue;
             }
             char *own = NULL;
@@ -386,6 +496,30 @@ char *cbb_to_html(const char *input) {
                 if (!own) { out.oom = 1; break; }
                 memcpy(own, t->arg, (size_t)t->arg_len);
                 own[t->arg_len] = '\0';
+                /* color, size, font land raw inside a style="..." attribute.
+                 * Reject any arg containing CSS meta-characters (; { } ( )),
+                 * any quote (so an attacker cannot break out of the
+                 * attribute via " or '), or whitespace other than a single
+                 * ASCII space - narrow enough to forbid property-injection. */
+                if (cbb_eq(t->name, t->name_len, "color")
+                 || cbb_eq(t->name, t->name_len, "size")
+                 || cbb_eq(t->name, t->name_len, "font")) {
+                    int bad = 0;
+                    int sp = 0;
+                    for (int k = 0; k < t->arg_len; ++k) {
+                        unsigned char c = (unsigned char)own[k];
+                        if (c == ';' || c == '{' || c == '}' ||
+                            c == '(' || c == ')' ||
+                            c == '"' || c == '\'') { bad = 1; break; }
+                        if (c == ' ') { sp++; continue; }
+                        if (c <= 0x20 || c == 0x7f) { bad = 1; break; }
+                    }
+                    if (bad || sp > 1) {
+                        free(own);
+                        cbb_stk_push(&stack, (cbb_st){NULL, NULL, 0});
+                        continue;
+                    }
+                }
                 int url_tag = cbb_eq(t->name, t->name_len, "url")
                            || cbb_eq(t->name, t->name_len, "img")
                            || cbb_eq(t->name, t->name_len, "youtube")
@@ -393,38 +527,94 @@ char *cbb_to_html(const char *input) {
                 if (url_tag && cbb_url_ok(own) != 0) {
                     /* Dangerous scheme: drop the tag. */
                     free(own);
-                    stack[depth].tag = NULL; stack[depth].arg = NULL; depth++;
+                    cbb_stk_push(&stack, (cbb_st){NULL, NULL, 0});
                     continue;
                 }
             }
-            stack[depth].tag = def; stack[depth].arg = own; depth++;
-            cbb_emit_open(&out, &stack[depth - 1]);
+            /* [img] without arg: enter "pending-src" mode. We push the
+             * img def onto the stack with img_pending=1 and let the TEXT
+             * handler accumulate inner text into arg. On the matching
+             * [/img], cbb_pop_to emits the <img> tag (handled by
+             * cbb_emit_close for img_pending entries). */
+            if (cbb_eq(t->name, t->name_len, "img") && !t->arg) {
+                cbb_st e = {def, NULL, 1};
+                cbb_stk_push(&stack, e);
+                if (stack.oom) { out.oom = 1; break; }
+                continue;
+            }
+            cbb_st e = {def, own, 0};
+            int idx = stack.len;
+            cbb_stk_push(&stack, e);
+            if (stack.oom) { out.oom = 1; break; }
+            cbb_emit_open(&out, &stack.data[idx]);
             continue;
         }
 
-        /* CLOSE */
+        /* CLOSE
+         *
+         * Both [code] and [noparse] push distinct entries onto the stack
+         * (code pushes the code tag def, noparse pushes NULL). A close
+         * pop only fires if the top of the stack matches the close name -
+         * same discipline used in the noparse>0 path above. */
         if (def && cbb_eq(t->name, t->name_len, "noparse")) {
-            if (depth > 0) --depth;
+            if (stack.len > 0 && stack.data[stack.len - 1].tag == NULL) {
+                stack.len--;
+                if (noparse > 0) noparse--;
+            }
             continue;
         }
         if (def && cbb_eq(t->name, t->name_len, "code")) {
-            if (in_code > 0) { cbb_puts(&out, "</code></pre>"); in_code--; }
-            if (depth > 0) --depth;
+            if (stack.len > 0
+             && stack.data[stack.len - 1].tag
+             && cbb_eq(stack.data[stack.len - 1].tag->name,
+                       (int)strlen(stack.data[stack.len - 1].tag->name),
+                       "code")) {
+                if (in_code > 0) { cbb_puts(&out, "</code></pre>"); in_code--; }
+                if (noparse > 0) noparse--;
+                stack.len--;
+            }
             continue;
         }
         if (def && cbb_eq(t->name, t->name_len, "*")) {
-            int li = cbb_find_li(stack, depth);
-            if (li >= 0) cbb_pop_to(&out, stack, &depth, li);
+            int li = cbb_find_li(&stack);
+            if (li >= 0) cbb_pop_to(&out, &stack, li);
             continue;
         }
-        int idx = cbb_find(stack, depth, t->name, t->name_len);
-        if (idx >= 0) cbb_pop_to(&out, stack, &depth, idx);
+        /* Close for [img]src[/img]: if the matching entry is img_pending,
+         * run URL sanitization on the accumulated src. If unsafe, drop
+         * the tag entirely (no <img> emitted; inner text was consumed
+         * into the entry's arg and gets freed by the cleanup). */
+        if (def && cbb_eq(t->name, t->name_len, "img")) {
+            int idx = -1;
+            for (int j = stack.len - 1; j >= 0; --j)
+                if (stack.data[j].tag && cbb_eq("img", 3, stack.data[j].tag->name)) {
+                    idx = j; break;
+                }
+            if (idx >= 0 && stack.data[idx].img_pending) {
+                char *src = stack.data[idx].arg;
+                if (src && cbb_url_ok(src) != 0) {
+                    /* Drop: free arg, shrink len, emit nothing. */
+                    free(src);
+                    stack.data[idx].arg = NULL;
+                    for (int j = idx; j < stack.len - 1; ++j)
+                        stack.data[j] = stack.data[j + 1];
+                    stack.len--;
+                    continue;
+                }
+            }
+            int fi = cbb_find(&stack, t->name, t->name_len);
+            if (fi >= 0) cbb_pop_to(&out, &stack, fi);
+            continue;
+        }
+        int idx = cbb_find(&stack, t->name, t->name_len);
+        if (idx >= 0) cbb_pop_to(&out, &stack, idx);
         /* unmatched close: silently ignored */
     }
 
     /* Auto-close any remaining open tags. */
-    for (int j = depth - 1; j >= 0; --j) cbb_emit_close(&out, &stack[j]);
-    for (int j = 0; j < depth; ++j) free(stack[j].arg);
+    for (int j = stack.len - 1; j >= 0; --j) cbb_emit_close(&out, &stack.data[j]);
+    for (int j = 0; j < stack.len; ++j) free(stack.data[j].arg);
+    free(stack.data);
     free(toks);
 
     if (out.oom) { free(out.data); return NULL; }

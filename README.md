@@ -85,8 +85,11 @@ That's the entire API.
 ## Supported tags
 
 A single hardcoded table drives rendering. Unknown tags are dropped (their
-content passes through as escaped text). `[code]` escapes but otherwise
-emits content verbatim. `[noparse]` suppresses inner tag processing.
+content passes through as escaped text). `[code]` and `[noparse]` both imply
+noparse semantics: inner tags are NOT processed, content is HTML-escaped but
+otherwise emitted verbatim (the source is shown literally, brackets and all).
+This matches what users expect from a code block - `[code][b]x[/b][/code]`
+renders `<pre><code>[b]x[/b]</code></pre>`, not `<pre><code><b>x</b></code></pre>`.
 
 | Input                          | Output                                              |
 |--------------------------------|-----------------------------------------------------|
@@ -98,11 +101,11 @@ emits content verbatim. `[noparse]` suppresses inner tag processing.
 | `[size=20px]x[/size]`          | `<span style="font-size:20px;">x</span>`            |
 | `[font=mono]x[/font]`          | `<span style="font-family:mono;">x</span>`          |
 | `[url=...]link[/url]`          | `<a href="...">link</a>`                            |
-| `[img=src]`                    | `<img src="src" alt="">`                            |
+| `[img=src]`, `[img]src[/img]`  | `<img src="src" alt="">` (both forms accepted)       |
 | `[youtube=ID]...[/youtube]`    | `<a href="https://www.youtube.com/watch?v=ID">YouTube</a>` |
 | `[email=a@b]text[/email]`      | `<a href="mailto:a@b">text</a>`                     |
 | `[quote]x[/quote]`             | `<blockquote>x</blockquote>`                        |
-| `[code]x[/code]`               | `<pre><code>x</code></pre>`                         |
+| `[code]x[/code]`               | `<pre><code>x</code></pre>` (inner tags NOT processed) |
 | `[list][*]a[*]b[/list]`        | `<ul><li>a</li><li>b</li></ul>`                     |
 | `[olist][*]a[*]b[/olist]`      | `<ol><li>a</li><li>b</li></ol>`                     |
 | `[*]`, `[li]`                  | `<li>...</li>` (auto-closed when another opens)     |
