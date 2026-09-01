@@ -41,8 +41,7 @@ your own `.c` files, create a `libcbb.c`:
 Compile `libcbb.c` once to `libcbb.o`, link it with your app, and have every
 other `.c` file just `#include "libcbb.h"` without the macro. Use this when
 you want shorter per-TU compile times. The shipped `src/libcbb.c` is exactly
-this two-line shim - it exists so projects already wired up against
-`src/libcbb.c` keep working.
+this two-line shim.
 
 ### Option C - CMake subdirectory (only for running this repo's tests)
 
